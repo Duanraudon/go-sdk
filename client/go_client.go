@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/big"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -54,6 +55,104 @@ const (
 // Dial connects a client to the given URL and groupID.
 func Dial(config *conf.Config) (*Client, error) {
 	return DialContext(context.Background(), config)
+}
+
+func DialWithClient(ctx context.Context, config *conf.Config, cli *http.Client) (*Client, error) {
+	return DialContextWithClient(ctx, config, cli)
+}
+
+func DialContextWithClient(ctx context.Context, config *conf.Config, cli *http.Client) (*Client, error) {
+	var c *conn.Connection
+	var err error
+	if config.IsHTTP {
+		c, err = conn.DialContextHTTP(config.NodeURL)
+	}
+	if config.IsHTTP == false {
+		c, err = conn.DialContextHTTPS(config.NodeURL, cli)
+	}
+
+	if config.IsChannel {
+		// try to parse use file
+		if config.TLSCAContext == nil {
+			config.TLSCAContext, err = ioutil.ReadFile(config.CAFile)
+			if err != nil {
+				return nil, fmt.Errorf("parse tls root certificate %v failed, err:%v", config.CAFile, err)
+			}
+		}
+		if config.TLSCertContext == nil {
+			config.TLSCertContext, err = ioutil.ReadFile(config.Cert)
+			if err != nil {
+				return nil, fmt.Errorf("parse tls certificate %v failed, err:%v", config.Cert, err)
+			}
+		}
+		if config.TLSKeyContext == nil {
+			config.TLSKeyContext, err = ioutil.ReadFile(config.Key)
+			if err != nil {
+				return nil, fmt.Errorf("parse tls key %v failed, err:%v", config.Key, err)
+			}
+		}
+		c, err = conn.DialContextChannel(config.NodeURL, config.TLSCAContext, config.TLSCertContext, config.TLSKeyContext, config.GroupID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	apiHandler := NewAPIHandler(c)
+
+	cv, err := apiHandler.GetClientVersion(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("%v", err)
+	}
+
+	// get supported FISCO BCOS version
+	var compatibleVersionStr string
+	if cv.GetSupportedVersion() == "" {
+		return nil, errors.New("JSON response does not contains the key : Supported Version")
+	} else {
+		compatibleVersionStr = cv.GetSupportedVersion()
+	}
+	compatibleVersion, err := getVersionNumber(compatibleVersionStr)
+	if err != nil {
+		return nil, fmt.Errorf("DialContext failed, err: %v", err)
+	}
+
+	// determine whether FISCO-BCOS Version is consistent with SMCrypto configuration item
+	var fiscoBcosVersion string
+	if cv.SupportedVersion == "" {
+		return nil, errors.New("JSON response does not contains the key : FISCO-BCOS Version")
+	} else {
+		fiscoBcosVersion = cv.GetFiscoBcosVersion()
+	}
+	nodeIsSupportedSM := strings.Contains(fiscoBcosVersion, "gm") || strings.Contains(fiscoBcosVersion, "GM")
+	if nodeIsSupportedSM != config.IsSMCrypto {
+		return nil, fmt.Errorf("the SDK set SMCrypt=%v, but the node is mismatched", config.IsSMCrypto)
+	}
+
+	// get node chain ID
+	var nodeChainID int64
+	nodeChainID, err = strconv.ParseInt(cv.GetChainId(), 10, 64)
+	if err != nil {
+		return nil, errors.New("JSON response does not contains the key : Chain Id")
+	}
+	if config.ChainID != nodeChainID {
+		return nil, errors.New("The chain ID of node is " + fmt.Sprint(nodeChainID) + ", but configuration is " + fmt.Sprint(config.ChainID))
+	}
+
+	client := Client{apiHandler: apiHandler, groupID: config.GroupID, compatibleVersion: compatibleVersion, chainID: config.ChainID, smCrypto: config.IsSMCrypto}
+	if !config.DynamicKey {
+		if config.IsSMCrypto {
+			client.auth = bind.NewSMCryptoTransactor(config.PrivateKey)
+		} else {
+			privateKey, err := crypto.ToECDSA(config.PrivateKey)
+			if err != nil {
+				logrus.Fatal(err)
+			}
+			client.auth = bind.NewKeyedTransactor(privateKey)
+		}
+		client.auth.GasLimit = big.NewInt(30000000)
+		client.callOpts = &bind.CallOpts{From: client.auth.From}
+	}
+
+	return &client, nil
 }
 
 // DialContext pass the context to the rpc client
@@ -268,7 +367,6 @@ func (c *Client) SubscribeEventLogs(eventLogParams types.EventLogParams, handler
 func (c *Client) UnSubscribeEventLogs(filterID string) error {
 	return c.apiHandler.UnSubscribeEventLogs(filterID)
 }
-
 
 func (c *Client) SubscribeTopic(topic string, handler func([]byte, *[]byte)) error {
 	return c.apiHandler.SubscribeTopic(topic, handler)

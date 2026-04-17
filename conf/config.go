@@ -15,6 +15,7 @@ import (
 // Config contains configuration items for sdk
 type Config struct {
 	IsHTTP         bool
+	IsChannel      bool
 	ChainID        int64
 	CAFile         string
 	TLSCAContext   []byte

@@ -21,6 +21,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -149,6 +150,11 @@ func (op *requestOp) wait(ctx context.Context, c *Connection) (*jsonrpcMessage, 
 func DialContextHTTP(rawurl string) (*Connection, error) {
 	rawurl = strings.ToLower(rawurl)
 	return DialHTTP(rawurl)
+}
+
+func DialContextHTTPS(rawurl string, client *http.Client) (*Connection, error) {
+	rawurl = strings.ToLower(rawurl)
+	return DialHTTPS(rawurl, client)
 }
 
 // DialContextChannel creates a new Channel client, just like Dial.
