@@ -64,10 +64,10 @@ func DialWithClient(ctx context.Context, config *conf.Config, cli *http.Client) 
 func DialContextWithClient(ctx context.Context, config *conf.Config, cli *http.Client) (*Client, error) {
 	var c *conn.Connection
 	var err error
-	if config.IsHTTP {
+	if config.IsHTTP && config.IsChannel == false {
 		c, err = conn.DialContextHTTP(config.NodeURL)
 	}
-	if config.IsHTTP == false {
+	if config.IsHTTP == false && config.IsChannel == false {
 		c, err = conn.DialContextHTTPS(config.NodeURL, cli)
 	}
 
