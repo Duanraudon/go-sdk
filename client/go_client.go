@@ -71,6 +71,10 @@ func DialContextWithClient(ctx context.Context, config *conf.Config, cli *http.C
 		c, err = conn.DialContextHTTPS(config.NodeURL, cli)
 	}
 
+	if config.IsHTTP && config.IsChannel {
+		return nil, errors.New("cannot set both IsHTTP and IsChannel to true")
+	}
+
 	if config.IsChannel {
 		// try to parse use file
 		if config.TLSCAContext == nil {
